@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Store Rating Platform</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 0;
+        background: #f5f5f5;
+      }
+      header {
+        background: #1f2933;
+        color: white;
+        padding: 12px 20px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .container {
+        max-width: 960px;
+        margin: 20px auto;
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      }
+      input, select, button {
+        padding: 6px 8px;
+        margin: 4px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 12px;
+      }
+      th, td {
+        padding: 8px;
+        border: 1px solid #ddd;
+      }
+      th {
+        cursor: pointer;
+        background: #f0f0f0;
+      }
+      .flex {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+      }
+      .mt-2 { margin-top: 8px; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <script type="text/babel">
+      const API_BASE = "http://localhost:4000";
+
+      function useAuth() {
+        const [user, setUser] = React.useState(() => {
+          const stored = localStorage.getItem("user");
+          return stored ? JSON.parse(stored) : null;
+        });
+
+        function saveAuth(data) {
+          localStorage.setItem("token", data.token);
+          localStorage.setItem("user", JSON.stringify(data.user));
+          setUser(data.user);
+        }
+
+        function logout() {
+          localStorage.removeItem("token");
+          localStorage.removeItem("user");
+          setUser(null);
+        }
+
+        return { user, saveAuth, logout };
+      }
+
+      function App() {
+        const { user, saveAuth, logout } = useAuth();
+        const [view, setView] = React.useState("login");
+
+        React.useEffect(() => {
+          if (!user) setView("login");
+          else if (user.role === "ADMIN") setView("admin");
+          else if (user.role === "USER") setView("user");
+          else if (user.role === "OWNER") setView("owner");
+        }, [user]);
+
+        const token = localStorage.getItem("token");
+
+        const axiosInstance = React.useMemo(() => {
+          const inst = axios.create({ baseURL: API_BASE });
+          inst.interceptors.request.use((config) => {
+            const t = localStorage.getItem("token");
+            if (t) config.headers.Authorization = "Bearer " + t;
+            return config;
+          });
+          return inst;
+        }, []);
+
+        return (
+          <>
+            <header>
+              <div>Store Rating Platform</div>
+              <div>
+                {user && (
+                  <>
+                    <span style={{ marginRight: "12px" }}>
+                      {user.name} ({user.role})
+                    </span>
+                    <button onClick={logout}>Logout</button>
+                  </>
+                )}
+              </div>
+            </header>
+            <div className="container">
+              {!user && (
+                <>
+                  <AuthForms axiosInstance={axiosInstance} onAuth={saveAuth} />
+                </>
+              )}
+
+              {user && user.role === "ADMIN" && (
+                <AdminDashboard axiosInstance={axiosInstance} />
+              )}
+              {user && user.role === "USER" && (
+                <UserStores axiosInstance={axiosInstance} />
+              )}
+              {user && user.role === "OWNER" && (
+                <OwnerDashboard axiosInstance={axiosInstance} />
+              )}
+            </div>
+          </>
+        );
+      }
+
+      function AuthForms({ axiosInstance, onAuth }) {
+        const [tab, setTab] = React.useState("login");
+
+        return (
+          <div>
+            <div className="flex">
+              <button onClick={() => setTab("login")}>Login</button>
+              <button onClick={() => setTab("signup")}>Signup (Normal User)</button>
+            </div>
+            {tab === "login" ? (
+              <LoginForm axiosInstance={axiosInstance} onAuth={onAuth} />
+            ) : (
+              <SignupForm axiosInstance={axiosInstance} onAuth={onAuth} />
+            )}
+          </div>
+        );
+      }
+
+      function LoginForm({ axiosInstance, onAuth }) {
+        const [email, setEmail] = React.useState("");
+        const [password, setPassword] = React.useState("");
+        const [error, setError] = React.useState("");
+
+        async function handleSubmit(e) {
+          e.preventDefault();
+          setError("");
+          try {
+            const res = await axiosInstance.post("/auth/login", { email, password });
+            onAuth(res.data);
+          } catch (err) {
+            setError(err.response?.data?.message || "Login failed");
+          }
+        }
+
+        return (
+          <form onSubmit={handleSubmit}>
+            <h3>Login</h3>
+            {error && <div style={{ color: "red" }}>{error}</div>}
+            <div>
+              <input
+                placeholder="Email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </div>
+            <div>
+              <input
+                placeholder="Password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </div>
+            <button type="submit">Login</button>
+          </form>
+        );
+      }
+
+      function SignupForm({ axiosInstance, onAuth }) {
+        const [name, setName] = React.useState("");
+        const [email, setEmail] = React.useState("");
+        const [address, setAddress] = React.useState("");
+        const [password, setPassword] = React.useState("");
+        const [error, setError] = React.useState("");
+
+        async function handleSubmit(e) {
+          e.preventDefault();
+          setError("");
+          try {
+            const res = await axiosInstance.post("/auth/signup", {
+              name,
+              email,
+              address,
+              password,
+            });
+            onAuth(res.data);
+          } catch (err) {
+            const msg =
+              err.response?.data?.errors?.join(", ") ||
+              err.response?.data?.message ||
+              "Signup failed";
+            setError(msg);
+          }
+        }
+
+        return (
+          <form onSubmit={handleSubmit}>
+            <h3>Signup</h3>
+            {error && <div style={{ color: "red" }}>{error}</div>}
+            <div>
+              <input
+                placeholder="Full Name (min 20 chars)"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </div>
+            <div>
+              <input
+                placeholder="Email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </div>
+            <div>
+              <input
+                placeholder="Address"
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+              />
+            </div>
+            <div>
+              <input
+                placeholder="Password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </div>
+            <button type="submit">Signup</button>
+          </form>
+        );
+      }
+
+      function AdminDashboard({ axiosInstance }) {
+        const [stats, setStats] = React.useState(null);
+        const [users, setUsers] = React.useState([]);
+        const [stores, setStores] = React.useState([]);
+        const [userFilters, setUserFilters] = React.useState({
+          name: "",
+          email: "",
+          address: "",
+          role: "",
+        });
+        const [storeFilters, setStoreFilters] = React.useState({
+          name: "",
+          email: "",
+          address: "",
+        });
+
+        React.useEffect(() => {
+          fetchStats();
+          fetchUsers();
+          fetchStores();
+        }, []);
+
+        async function fetchStats() {
+          const res = await axiosInstance.get("/admin/dashboard");
+          setStats(res.data);
+        }
+
+        async function fetchUsers() {
+          const res = await axiosInstance.get("/admin/users", { params: userFilters });
+          setUsers(res.data);
+        }
+
+        async function fetchStores() {
+          const res = await axiosInstance.get("/admin/stores", { params: storeFilters });
+          setStores(res.data);
+        }
+
+        return (
+          <div>
+            <h2>Admin Dashboard</h2>
+            {stats && (
+              <div className="flex">
+                <div>Total Users: {stats.userCount}</div>
+                <div>Total Stores: {stats.storeCount}</div>
+                <div>Total Ratings: {stats.ratingCount}</div>
+              </div>
+            )}
+
+            <div className="mt-2">
+              <h3>Users</h3>
+              <div className="flex">
+                <input
+                  placeholder="Name"
+                  value={userFilters.name}
+                  onChange={(e) =>
+                    setUserFilters({ ...userFilters, name: e.target.value })
+                  }
+                />
+                <input
+                  placeholder="Email"
+                  value={userFilters.email}
+                  onChange={(e) =>
+                    setUserFilters({ ...userFilters, email: e.target.value })
+                  }
+                />
+                <input
+                  placeholder="Address"
+                  value={userFilters.address}
+                  onChange={(e) =>
+                    setUserFilters({ ...userFilters, address: e.target.value })
+                  }
+                />
+                <select
+                  value={userFilters.role}
+                  onChange={(e) =>
+                    setUserFilters({ ...userFilters, role: e.target.value })
+                  }
+                >
+                  <option value="">All Roles</option>
+                  <option value="ADMIN">ADMIN</option>
+                  <option value="USER">USER</option>
+                  <option value="OWNER">OWNER</option>
+                </select>
+                <button onClick={fetchUsers}>Filter</button>
+              </div>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Address</th>
+                    <th>Role</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.map((u) => (
+                    <tr key={u.id}>
+                      <td>{u.name}</td>
+                      <td>{u.email}</td>
+                      <td>{u.address}</td>
+                      <td>{u.role}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="mt-2">
+              <h3>Stores</h3>
+              <div className="flex">
+                <input
+                  placeholder="Name"
+                  value={storeFilters.name}
+                  onChange={(e) =>
+                    setStoreFilters({ ...storeFilters, name: e.target.value })
+                  }
+                />
+                <input
+                  placeholder="Email"
+                  value={storeFilters.email}
+                  onChange={(e) =>
+                    setStoreFilters({ ...storeFilters, email: e.target.value })
+                  }
+                />
+                <input
+                  placeholder="Address"
+                  value={storeFilters.address}
+                  onChange={(e) =>
+                    setStoreFilters({ ...storeFilters, address: e.target.value })
+                  }
+                />
+                <button onClick={fetchStores}>Filter</button>
+              </div>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Address</th>
+                    <th>Avg Rating</th>
+                    <th>Rating Count</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stores.map((s) => (
+                    <tr key={s.id}>
+                      <td>{s.name}</td>
+                      <td>{s.email}</td>
+                      <td>{s.address}</td>
+                      <td>{s.avg_rating ?? "0"}</td>
+                      <td>{s.rating_count}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      }
+
+      function UserStores({ axiosInstance }) {
+        const [stores, setStores] = React.useState([]);
+        const [filters, setFilters] = React.useState({
+          searchName: "",
+          searchAddress: "",
+        });
+
+        React.useEffect(() => {
+          fetchStores();
+        }, []);
+
+        async function fetchStores() {
+          const res = await axiosInstance.get("/user/stores", { params: filters });
+          setStores(res.data);
+        }
+
+        async function handleRatingChange(storeId, rating) {
+          if (!rating) return;
+          await axiosInstance.post(`/user/stores/${storeId}/ratings`, { rating });
+          fetchStores();
+        }
+
+        return (
+          <div>
+            <h2>Stores</h2>
+            <div className="flex">
+              <input
+                placeholder="Search name"
+                value={filters.searchName}
+                onChange={(e) =>
+                  setFilters({ ...filters, searchName: e.target.value })
+                }
+              />
+              <input
+                placeholder="Search address"
+                value={filters.searchAddress}
+                onChange={(e) =>
+                  setFilters({ ...filters, searchAddress: e.target.value })
+                }
+              />
+              <button onClick={fetchStores}>Search</button>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Address</th>
+                  <th>Overall Rating</th>
+                  <th>Your Rating</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stores.map((s) => (
+                  <StoreRow key={s.id} store={s} onRate={handleRatingChange} />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      }
+
+      function StoreRow({ store, onRate }) {
+        const [rating, setRating] = React.useState(store.user_rating || 0);
+
+        return (
+          <tr>
+            <td>{store.name}</td>
+            <td>{store.address}</td>
+            <td>{store.avg_rating ?? "0"}</td>
+            <td>
+              <select
+                value={rating}
+                onChange={(e) => setRating(Number(e.target.value))}
+              >
+                <option value={0}>--</option>
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </td>
+            <td>
+              <button onClick={() => onRate(store.id, rating)}>
+                {store.user_rating ? "Update" : "Submit"}
+              </button>
+            </td>
+          </tr>
+        );
+      }
+
+      function OwnerDashboard({ axiosInstance }) {
+        const [data, setData] = React.useState(null);
+
+        React.useEffect(() => {
+          fetchData();
+        }, []);
+
+        async function fetchData() {
+          const res = await axiosInstance.get("/owner/dashboard");
+          setData(res.data);
+        }
+
+        if (!data) return <div>Loading...</div>;
+        if (!data.store) return <div>You do not have a store assigned yet.</div>;
+
+        return (
+          <div>
+            <h2>Owner Dashboard</h2>
+            <div>
+              <strong>Store:</strong> {data.store.name} | Avg Rating:{" "}
+              {data.store.avg_rating ?? "0"} ({data.store.rating_count} ratings)
+            </div>
+            <h3 className="mt-2">User Ratings</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>User Name</th>
+                  <th>User Email</th>
+                  <th>Rating</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.ratings.map((r, idx) => (
+                  <tr key={idx}>
+                    <td>{r.user_name}</td>
+                    <td>{r.user_email}</td>
+                    <td>{r.rating}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      }
+
+      const root = ReactDOM.createRoot(document.getElementById("root"));
+      root.render(<App />);
+    </script>
+  </body>
+</html>
